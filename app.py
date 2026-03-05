@@ -14,15 +14,25 @@ st.set_page_config(page_title="B2B Client Risk Dashboard", layout="wide")
 
 st.title("B2B Client Risk & Churn Prediction Dashboard")
 
-# -----------------------------
-# Load Data
-# -----------------------------
+# --------------------------------------------------
+# Upload Dataset
+# --------------------------------------------------
 
-data = pd.read_csv("B2B_Client_Churn_5000.csv")
+st.sidebar.header("Upload Dataset")
 
-# -----------------------------
+uploaded_file = st.sidebar.file_uploader(
+    "Upload B2B Client Dataset (CSV)", type=["csv"]
+)
+
+if uploaded_file is not None:
+    data = pd.read_csv(uploaded_file)
+else:
+    st.warning("Please upload the dataset to continue.")
+    st.stop()
+
+# --------------------------------------------------
 # Risk Score Logic
-# -----------------------------
+# --------------------------------------------------
 
 def calculate_risk(row):
 
@@ -42,21 +52,27 @@ def calculate_risk(row):
 
     return score
 
+
 data["Risk_Score"] = data.apply(calculate_risk, axis=1)
 
+
 def risk_category(score):
+
     if score <= 2:
         return "Low Risk"
-    elif score <=5:
+
+    elif score <= 5:
         return "Medium Risk"
+
     else:
         return "High Risk"
 
+
 data["Risk_Category"] = data["Risk_Score"].apply(risk_category)
 
-# -----------------------------
+# --------------------------------------------------
 # Sidebar Filters
-# -----------------------------
+# --------------------------------------------------
 
 st.sidebar.header("Filters")
 
@@ -84,15 +100,9 @@ filtered = data[
     (data["Risk_Category"].isin(risk))
 ]
 
-# -----------------------------
-# KPI Cards
-# -----------------------------
-
-total_clients = len(filtered)
-high_risk = len(filtered[filtered["Risk_Category"]=="High Risk"])
-avg_revenue = filtered["Revenue"].mean()
-
-# Machine Learning preparation
+# --------------------------------------------------
+# Machine Learning Model
+# --------------------------------------------------
 
 le = LabelEncoder()
 
@@ -102,7 +112,7 @@ ml_data["Industry"] = le.fit_transform(ml_data["Industry"])
 ml_data["Region"] = le.fit_transform(ml_data["Region"])
 ml_data["Renewal_Status"] = le.fit_transform(ml_data["Renewal_Status"])
 
-X = ml_data.drop(["Client_ID","Renewal_Status","Risk_Category"], axis=1)
+X = ml_data.drop(["Client_ID", "Renewal_Status", "Risk_Category"], axis=1)
 y = ml_data["Renewal_Status"]
 
 X_train, X_test, y_train, y_test = train_test_split(
@@ -110,6 +120,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 model = DecisionTreeClassifier(max_depth=5)
+
 model.fit(X_train, y_train)
 
 pred = model.predict(X_test)
@@ -118,44 +129,57 @@ accuracy = accuracy_score(y_test, pred)
 
 churn_rate = (1 - y.mean()) * 100
 
+# --------------------------------------------------
+# KPI Cards
+# --------------------------------------------------
+
+total_clients = len(filtered)
+high_risk = len(filtered[filtered["Risk_Category"] == "High Risk"])
+avg_revenue = filtered["Revenue"].mean()
+
 col1, col2, col3, col4 = st.columns(4)
 
 col1.metric("Total Clients", total_clients)
 col2.metric("High Risk Clients", high_risk)
-col3.metric("Predicted Churn Rate %", round(churn_rate,2))
-col4.metric("Average Revenue", round(avg_revenue,2))
+col3.metric("Predicted Churn Rate %", round(churn_rate, 2))
+col4.metric("Average Revenue", round(avg_revenue, 2))
 
-# -----------------------------
-# Risk Distribution Chart
-# -----------------------------
+# --------------------------------------------------
+# Risk Distribution
+# --------------------------------------------------
 
 st.subheader("Risk Category Distribution")
 
-fig, ax = plt.subplots()
+fig1, ax1 = plt.subplots()
 
-sns.countplot(data=filtered, x="Risk_Category", ax=ax)
+sns.countplot(data=filtered, x="Risk_Category", ax=ax1)
 
-st.pyplot(fig)
+st.pyplot(fig1)
 
-# -----------------------------
+# --------------------------------------------------
 # Industry Risk Analysis
-# -----------------------------
+# --------------------------------------------------
 
-st.subheader("Industry-wise Risk")
+st.subheader("Industry-wise Risk Analysis")
 
 fig2, ax2 = plt.subplots()
 
-sns.countplot(data=filtered, x="Industry", hue="Risk_Category", ax=ax2)
+sns.countplot(
+    data=filtered,
+    x="Industry",
+    hue="Risk_Category",
+    ax=ax2
+)
 
 plt.xticks(rotation=45)
 
 st.pyplot(fig2)
 
-# -----------------------------
+# --------------------------------------------------
 # Revenue vs Risk
-# -----------------------------
+# --------------------------------------------------
 
-st.subheader("Revenue vs Risk Scatter")
+st.subheader("Revenue vs Risk Scatter Plot")
 
 fig3, ax3 = plt.subplots()
 
@@ -169,9 +193,9 @@ sns.scatterplot(
 
 st.pyplot(fig3)
 
-# -----------------------------
+# --------------------------------------------------
 # Contract Length vs Churn
-# -----------------------------
+# --------------------------------------------------
 
 st.subheader("Contract Length vs Churn")
 
@@ -186,25 +210,25 @@ sns.boxplot(
 
 st.pyplot(fig4)
 
-# -----------------------------
-# Confusion Matrix
-# -----------------------------
+# --------------------------------------------------
+# Model Performance
+# --------------------------------------------------
 
 st.subheader("Model Performance")
 
-st.write("Accuracy:", round(accuracy,2))
+st.write("Model Accuracy:", round(accuracy, 2))
 
 cm = confusion_matrix(y_test, pred)
 
 fig5, ax5 = plt.subplots()
 
-sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax5)
 
 st.pyplot(fig5)
 
-# -----------------------------
+# --------------------------------------------------
 # Feature Importance
-# -----------------------------
+# --------------------------------------------------
 
 st.subheader("Feature Importance")
 
@@ -215,48 +239,48 @@ importance = pd.Series(
 
 st.bar_chart(importance)
 
-# -----------------------------
+# --------------------------------------------------
 # Top High Risk Clients
-# -----------------------------
+# --------------------------------------------------
 
 st.subheader("Top 20 High Risk Clients")
 
-highrisk_table = data[data["Risk_Category"]=="High Risk"].head(20)
+highrisk_table = data[data["Risk_Category"] == "High Risk"].head(20)
 
 st.dataframe(highrisk_table)
 
-# -----------------------------
+# --------------------------------------------------
 # Retention Strategy
-# -----------------------------
+# --------------------------------------------------
 
 st.subheader("AI Retention Strategy")
 
 if st.button("Generate Retention Strategy"):
 
-    st.success("Recommended Actions")
+    st.success("Recommended Retention Strategies")
 
-    st.write("• Offer discount for clients with payment delays over 30 days")
+    st.write("• Offer discount for clients with payment delay greater than 30 days")
 
-    st.write("• Assign dedicated account manager for high revenue clients")
+    st.write("• Assign a dedicated account manager for high revenue clients")
 
-    st.write("• Provide long-term contract incentives")
+    st.write("• Offer incentives for longer contract renewals")
 
-    st.write("• Reduce support response time for clients with many tickets")
+    st.write("• Improve customer support response time")
 
-    st.write("• Offer product training for low-usage customers")
+    st.write("• Provide onboarding or training for low usage clients")
 
-# -----------------------------
+# --------------------------------------------------
 # Responsible AI Section
-# -----------------------------
+# --------------------------------------------------
 
 st.subheader("Responsible AI Considerations")
 
 st.write("""
-• Predictive models may contain bias based on industry or region.
+• Predictive models may contain bias depending on training data.
 
-• Labeling clients as high-risk may affect business relationships.
+• Labeling customers as high-risk can influence business decisions.
 
-• Client financial and usage data must be protected.
+• Client data must be handled securely to protect privacy.
 
-• AI predictions should assist decision-making, not replace human judgement.
+• AI predictions should support human decision-making rather than replace it.
 """)
