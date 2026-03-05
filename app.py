@@ -2,37 +2,29 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix
-from sklearn.preprocessing import LabelEncoder
-
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 st.set_page_config(page_title="B2B Client Risk Dashboard", layout="wide")
 
 st.title("B2B Client Risk & Churn Prediction Dashboard")
 
-# --------------------------------------------------
-# Upload Dataset
-# --------------------------------------------------
+# -------------------------------
+# Load Dataset
+# -------------------------------
 
-st.sidebar.header("Upload Dataset")
+data = pd.read_csv("B2B_Client_Churn_5000.csv")
 
-uploaded_file = st.sidebar.file_uploader(
-    "Upload B2B Client Dataset (CSV)", type=["csv"]
-)
+st.subheader("Dataset Preview")
+st.dataframe(data.head())
 
-if uploaded_file is not None:
-    data = pd.read_csv(uploaded_file)
-else:
-    st.warning("Please upload the dataset to continue.")
-    st.stop()
-
-# --------------------------------------------------
+# -------------------------------
 # Risk Score Logic
-# --------------------------------------------------
+# -------------------------------
 
 def calculate_risk(row):
 
@@ -41,13 +33,13 @@ def calculate_risk(row):
     if row["Payment_Delay_Days"] > 30:
         score += 3
 
-    if row["Monthly_Usage"] < 50:
+    if row["Monthly_Usage_Score"] < 50:
         score += 2
 
-    if row["Contract_Length"] < 6:
+    if row["Contract_Length_Months"] < 12:
         score += 2
 
-    if row["Support_Tickets"] > 5:
+    if row["Support_Tickets_Last30Days"] > 5:
         score += 2
 
     return score
@@ -55,71 +47,129 @@ def calculate_risk(row):
 
 data["Risk_Score"] = data.apply(calculate_risk, axis=1)
 
+# -------------------------------
+# Risk Category
+# -------------------------------
 
 def risk_category(score):
 
-    if score <= 2:
-        return "Low Risk"
+    if score >= 6:
+        return "High"
 
-    elif score <= 5:
-        return "Medium Risk"
+    elif score >= 3:
+        return "Medium"
 
     else:
-        return "High Risk"
+        return "Low"
 
 
 data["Risk_Category"] = data["Risk_Score"].apply(risk_category)
 
-# --------------------------------------------------
+# -------------------------------
 # Sidebar Filters
-# --------------------------------------------------
+# -------------------------------
 
 st.sidebar.header("Filters")
 
-region = st.sidebar.multiselect(
-    "Select Region",
-    data["Region"].unique(),
-    default=data["Region"].unique()
-)
+region = st.sidebar.selectbox("Region", data["Region"].unique())
 
-industry = st.sidebar.multiselect(
-    "Select Industry",
-    data["Industry"].unique(),
-    default=data["Industry"].unique()
-)
+industry = st.sidebar.selectbox("Industry", data["Industry"].unique())
 
-risk = st.sidebar.multiselect(
-    "Select Risk Category",
-    data["Risk_Category"].unique(),
-    default=data["Risk_Category"].unique()
-)
+risk = st.sidebar.selectbox("Risk Category", data["Risk_Category"].unique())
 
-filtered = data[
-    (data["Region"].isin(region)) &
-    (data["Industry"].isin(industry)) &
-    (data["Risk_Category"].isin(risk))
+filtered_data = data[
+    (data["Region"] == region)
+    & (data["Industry"] == industry)
+    & (data["Risk_Category"] == risk)
 ]
 
-# --------------------------------------------------
-# Machine Learning Model
-# --------------------------------------------------
+# -------------------------------
+# KPI Metrics
+# -------------------------------
 
-le = LabelEncoder()
+total_clients = len(data)
+
+high_risk = len(data[data["Risk_Category"] == "High"])
+
+churn_rate = (data["Renewal_Status"] == "No").mean() * 100
+
+avg_revenue = data["Monthly_Revenue_USD"].mean()
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Total Clients", total_clients)
+
+col2.metric("High Risk Clients", high_risk)
+
+col3.metric("Churn Rate %", round(churn_rate, 2))
+
+col4.metric("Average Revenue", round(avg_revenue, 2))
+
+# -------------------------------
+# Risk Distribution Chart
+# -------------------------------
+
+st.subheader("Risk Category Distribution")
+
+fig, ax = plt.subplots()
+
+data["Risk_Category"].value_counts().plot(kind="bar", ax=ax)
+
+st.pyplot(fig)
+
+# -------------------------------
+# Industry Risk Analysis
+# -------------------------------
+
+st.subheader("Industry-wise Risk Analysis")
+
+fig, ax = plt.subplots()
+
+sns.countplot(data=data, x="Industry", hue="Risk_Category")
+
+plt.xticks(rotation=45)
+
+st.pyplot(fig)
+
+# -------------------------------
+# Revenue vs Usage Scatter
+# -------------------------------
+
+st.subheader("Revenue vs Usage")
+
+fig, ax = plt.subplots()
+
+sns.scatterplot(
+    data=data,
+    x="Monthly_Revenue_USD",
+    y="Monthly_Usage_Score",
+    hue="Risk_Category"
+)
+
+st.pyplot(fig)
+
+# -------------------------------
+# Machine Learning Model
+# -------------------------------
+
+st.subheader("Machine Learning: Churn Prediction")
 
 ml_data = data.copy()
 
-ml_data["Industry"] = le.fit_transform(ml_data["Industry"])
-ml_data["Region"] = le.fit_transform(ml_data["Region"])
-ml_data["Renewal_Status"] = le.fit_transform(ml_data["Renewal_Status"])
+ml_data["Renewal_Status"] = ml_data["Renewal_Status"].map({"Yes": 1, "No": 0})
 
-X = ml_data.drop(["Client_ID", "Renewal_Status", "Risk_Category"], axis=1)
-y = ml_data["Renewal_Status"]
+ml_data = pd.get_dummies(ml_data, columns=["Industry", "Region", "Plan"], drop_first=True)
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+X = ml_data.drop(
+    ["Client_ID", "Company_Name", "Renewal_Status", "Last_Renewal_Date", "Risk_Category"],
+    axis=1
 )
 
-model = DecisionTreeClassifier(max_depth=5)
+y = ml_data["Renewal_Status"]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+model = DecisionTreeClassifier()
 
 model.fit(X_train, y_train)
 
@@ -127,160 +177,70 @@ pred = model.predict(X_test)
 
 accuracy = accuracy_score(y_test, pred)
 
-churn_rate = (1 - y.mean()) * 100
+st.write("Model Accuracy:", round(accuracy, 3))
 
-# --------------------------------------------------
-# KPI Cards
-# --------------------------------------------------
-
-total_clients = len(filtered)
-high_risk = len(filtered[filtered["Risk_Category"] == "High Risk"])
-avg_revenue = filtered["Revenue"].mean()
-
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Total Clients", total_clients)
-col2.metric("High Risk Clients", high_risk)
-col3.metric("Predicted Churn Rate %", round(churn_rate, 2))
-col4.metric("Average Revenue", round(avg_revenue, 2))
-
-# --------------------------------------------------
-# Risk Distribution
-# --------------------------------------------------
-
-st.subheader("Risk Category Distribution")
-
-fig1, ax1 = plt.subplots()
-
-sns.countplot(data=filtered, x="Risk_Category", ax=ax1)
-
-st.pyplot(fig1)
-
-# --------------------------------------------------
-# Industry Risk Analysis
-# --------------------------------------------------
-
-st.subheader("Industry-wise Risk Analysis")
-
-fig2, ax2 = plt.subplots()
-
-sns.countplot(
-    data=filtered,
-    x="Industry",
-    hue="Risk_Category",
-    ax=ax2
-)
-
-plt.xticks(rotation=45)
-
-st.pyplot(fig2)
-
-# --------------------------------------------------
-# Revenue vs Risk
-# --------------------------------------------------
-
-st.subheader("Revenue vs Risk Scatter Plot")
-
-fig3, ax3 = plt.subplots()
-
-sns.scatterplot(
-    data=filtered,
-    x="Revenue",
-    y="Risk_Score",
-    hue="Risk_Category",
-    ax=ax3
-)
-
-st.pyplot(fig3)
-
-# --------------------------------------------------
-# Contract Length vs Churn
-# --------------------------------------------------
-
-st.subheader("Contract Length vs Churn")
-
-fig4, ax4 = plt.subplots()
-
-sns.boxplot(
-    data=data,
-    x="Renewal_Status",
-    y="Contract_Length",
-    ax=ax4
-)
-
-st.pyplot(fig4)
-
-# --------------------------------------------------
-# Model Performance
-# --------------------------------------------------
-
-st.subheader("Model Performance")
-
-st.write("Model Accuracy:", round(accuracy, 2))
+# -------------------------------
+# Confusion Matrix
+# -------------------------------
 
 cm = confusion_matrix(y_test, pred)
 
-fig5, ax5 = plt.subplots()
+fig, ax = plt.subplots()
 
-sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax5)
+sns.heatmap(cm, annot=True, fmt="d")
 
-st.pyplot(fig5)
+st.pyplot(fig)
 
-# --------------------------------------------------
+# -------------------------------
 # Feature Importance
-# --------------------------------------------------
+# -------------------------------
 
 st.subheader("Feature Importance")
 
-importance = pd.Series(
-    model.feature_importances_,
-    index=X.columns
-).sort_values(ascending=False)
+importance = pd.Series(model.feature_importances_, index=X.columns)
 
 st.bar_chart(importance)
 
-# --------------------------------------------------
+# -------------------------------
 # Top High Risk Clients
-# --------------------------------------------------
+# -------------------------------
 
 st.subheader("Top 20 High Risk Clients")
 
-highrisk_table = data[data["Risk_Category"] == "High Risk"].head(20)
+high_clients = data[data["Risk_Category"] == "High"]
 
-st.dataframe(highrisk_table)
+st.dataframe(high_clients.head(20))
 
-# --------------------------------------------------
+# -------------------------------
 # Retention Strategy
-# --------------------------------------------------
-
-st.subheader("AI Retention Strategy")
+# -------------------------------
 
 if st.button("Generate Retention Strategy"):
 
-    st.success("Recommended Retention Strategies")
+    st.write("### Suggested Strategies")
 
-    st.write("• Offer discount for clients with payment delay greater than 30 days")
+    st.write("• Offer discount for delayed payments")
 
-    st.write("• Assign a dedicated account manager for high revenue clients")
+    st.write("• Assign dedicated account managers")
 
-    st.write("• Offer incentives for longer contract renewals")
+    st.write("• Provide training to increase product usage")
+
+    st.write("• Offer long-term contract incentives")
 
     st.write("• Improve customer support response time")
 
-    st.write("• Provide onboarding or training for low usage clients")
+# -------------------------------
+# Responsible AI
+# -------------------------------
 
-# --------------------------------------------------
-# Responsible AI Section
-# --------------------------------------------------
-
-st.subheader("Responsible AI Considerations")
+st.subheader("Ethical Implications of Predicting Client Churn")
 
 st.write("""
-• Predictive models may contain bias depending on training data.
+• Machine learning models may contain bias depending on the training data.
 
-• Labeling customers as high-risk can influence business decisions.
+• Labeling customers as 'High Risk' can influence business decisions unfairly.
 
-• Client data must be handled securely to protect privacy.
+• Client data must be protected to ensure privacy.
 
-• AI predictions should support human decision-making rather than replace it.
+• AI predictions should support human decision-making, not replace it.
 """)
